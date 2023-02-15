@@ -88,10 +88,12 @@ export default class MyPlugin extends Plugin {
 			};
 			previousCounts = this.settings.previousCounts[filepath];
 		} else {
+			if (previousCounts.lastDate !== day) {
+				previousCounts.prevDate = previousCounts.lastDate;
+				previousCounts.lastDate = day;
+			}
 			initial = previousCounts.lastObservedCount;
 			previousCounts.lastObservedCount = wordCount;
-			previousCounts.prevDate = previousCounts.lastDate;
-			previousCounts.lastDate = day;
 		}
 
 		var todayWordCounts = dayToWordCounts[filepath];
