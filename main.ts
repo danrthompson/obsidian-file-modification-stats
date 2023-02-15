@@ -20,6 +20,7 @@ interface PreviousWordCount {
 	lastDate: string;
 	prevDate: string;
 	firstDate: string;
+	countOnPluginInstallation: number;
 }
 
 interface DailyStatsSettings {
@@ -60,6 +61,32 @@ export default class MyPlugin extends Plugin {
 		);
 	}
 
+	async processNotesAfterInstallation() {
+		const files = this.app.vault.getMarkdownFiles();
+		var i = 0;
+		for (const file of files) {
+			const path = file.path;
+			const previousCounts = this.settings.previousCounts[path];
+			if (!previousCounts) {
+				const creationDate = moment
+					.tz(file.stat.ctime, "America/New_York")
+					.format("YYYY-MM-DD");
+				const modificationDate = moment
+					.tz(file.stat.mtime, "America/New_York")
+					.format("YYYY-MM-DD");
+				const content = await this.app.vault.read(file);
+				const wordCount = this.getWordCount(content);
+				this.settings.previousCounts[path] = {
+					lastObservedCount: wordCount,
+					lastDate: modificationDate,
+					prevDate: creationDate,
+					firstDate: creationDate,
+					countOnPluginInstallation: wordCount,
+				};
+			}
+		}
+	}
+
 	onChange(editor: Editor, info: MarkdownView | MarkdownFileInfo) {
 		const path = info.file?.path;
 		if (path) {
@@ -81,6 +108,7 @@ export default class MyPlugin extends Plugin {
 		var initial = 0;
 		if (!previousCounts) {
 			this.settings.previousCounts[filepath] = {
+				countOnPluginInstallation: 0,
 				lastObservedCount: wordCount,
 				lastDate: day,
 				prevDate: "None",
