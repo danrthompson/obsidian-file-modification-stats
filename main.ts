@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import moment from "moment-timezone";
 import {
 	debounce,
@@ -23,20 +25,22 @@ interface PreviousWordCount {
 	countOnPluginInstallation: number;
 }
 
-interface DailyStatsSettings {
+interface FileModificationSettings {
+	lastModTime: number;
 	today: string;
 	previousCounts: Record<string, PreviousWordCount>;
 	dayToWordCounts: Record<string, Record<string, WordCount>>;
 }
 
-const DEFAULT_SETTINGS: DailyStatsSettings = {
+const DEFAULT_SETTINGS: FileModificationSettings = {
+	lastModTime: moment.utc().valueOf(),
 	today: moment().tz("America/New_York").format("YYYY-MM-DD"),
 	previousCounts: {},
 	dayToWordCounts: {},
 };
 
 export default class MyPlugin extends Plugin {
-	settings: DailyStatsSettings;
+	settings: FileModificationSettings;
 	debouncedUpdate: Debouncer<[editor: Editor, filepath: string], void>;
 
 	async onload() {
@@ -52,7 +56,7 @@ export default class MyPlugin extends Plugin {
 		this.registerInterval(
 			window.setInterval(() => {
 				this.updateDate();
-				this.saveSettings();
+				this.updateSettings();
 			}, 1000)
 		);
 
@@ -85,9 +89,9 @@ export default class MyPlugin extends Plugin {
 				};
 			}
 		}
+		this.updateSettingsModTime();
 	}
-
-	onChange(editor: Editor, info: MarkdownView | MarkdownFileInfo) {
+	async onChange(editor: Editor, info: MarkdownView | MarkdownFileInfo) {
 		const path = info.file?.path;
 		if (path) {
 			this.debouncedUpdate(editor, path);
@@ -134,12 +138,15 @@ export default class MyPlugin extends Plugin {
 		} else {
 			todayWordCounts.current = wordCount;
 		}
+		this.updateSettingsModTime();
 	}
 
 	updateDate() {
-		this.settings.today = moment()
-			.tz("America/New_York")
-			.format("YYYY-MM-DD");
+		const today = moment().tz("America/New_York").format("YYYY-MM-DD");
+		if (this.settings.today !== today) {
+			this.settings.today = today;
+			this.updateSettingsModTime();
+		}
 	}
 
 	getWordCount(text: string): number {
@@ -165,7 +172,9 @@ export default class MyPlugin extends Plugin {
 		return (text.match(pattern) || []).length;
 	}
 
-	onunload() {}
+	onunload() {
+		this.updateSettings();
+	}
 
 	async loadSettings() {
 		this.settings = Object.assign(
@@ -173,6 +182,20 @@ export default class MyPlugin extends Plugin {
 			DEFAULT_SETTINGS,
 			await this.loadData()
 		);
+	}
+
+	async updateSettings() {
+		const dataContents = await this.loadData();
+		const lastModTime = dataContents.lastModTime || 0;
+		if (lastModTime < this.settings.lastModTime) {
+			await this.saveData(this.settings);
+		} else if (lastModTime > this.settings.lastModTime) {
+			await this.loadSettings();
+		}
+	}
+
+	updateSettingsModTime() {
+		this.settings.lastModTime = moment.utc().valueOf();
 	}
 
 	async saveSettings() {
