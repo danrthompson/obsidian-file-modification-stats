@@ -23,6 +23,8 @@ Right now, it will not handle renaming files or deleting files properly. Renamed
 ## Future Features
 I want to add commands that will automatically create dataview queries to show daily stats on your daily notes page, as well as other queries that show useful information.
 
+Right now, I have a dataview query that I am using that shows the files modified on a given day on the daily note page. I'd like to change what it shows, and also add stats about how many words were added in a given day, or a given range of days.
+
 I want to add a command that will call `processNotesAfterInstallation`.
 
 This is very much a hobby project, so I cannot guarantee there will be any future additions to the project going forward.
