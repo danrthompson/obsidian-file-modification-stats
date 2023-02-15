@@ -25,6 +25,8 @@ I want to add commands that will automatically create dataview queries to show d
 
 Right now, I have a dataview query that I am using that shows the files modified on a given day on the daily note page. I'd like to change what it shows, and also add stats about how many words were added in a given day, or a given range of days.
 
+Ideally, I'd like to exclude words that were written by a template, especially for Daily Notes. I have quite a large template that I use for each day (around 500 words), and I'd like to be able to differentiate between words automatically written by a template vs words that I actually wrote.
+
 I want to add a command that will call `processNotesAfterInstallation`.
 
 This is very much a hobby project, so I cannot guarantee there will be any future additions to the project going forward.
