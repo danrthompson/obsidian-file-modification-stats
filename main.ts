@@ -17,19 +17,19 @@ interface WordCount {
 	current: number;
 	nameAtTime: string;
 	currentName: string;
-	deleted: boolean;
 	created: boolean;
+	deleted: boolean;
 	renamed: boolean;
 }
 
 interface PreviousWordCount {
 	lastObservedCount: number;
+	createdDate: string | null;
+	firstDate: string;
 	lastDate: string;
 	prevDate: string | null;
-	firstDate: string;
-	countOnPluginInstallation: number;
 	deletedDate: string | null;
-	createdDate: string | null;
+	countOnPluginInstallation: number;
 }
 
 interface FileModificationSettings {
@@ -37,7 +37,6 @@ interface FileModificationSettings {
 	today: string;
 	previousCounts: Record<string, PreviousWordCount>;
 	dayToWordCounts: Record<string, Record<string, WordCount>>;
-	blockedFiles: Set<string>;
 }
 
 const DEFAULT_SETTINGS: FileModificationSettings = {
@@ -45,7 +44,6 @@ const DEFAULT_SETTINGS: FileModificationSettings = {
 	today: moment().tz("America/New_York").format("YYYY-MM-DD"),
 	previousCounts: {},
 	dayToWordCounts: {},
-	blockedFiles: new Set(),
 };
 
 export default class MyPlugin extends Plugin {
@@ -55,11 +53,13 @@ export default class MyPlugin extends Plugin {
 		void
 	>;
 	lock: AsyncLock;
+	blockedFiles: Set<string>;
 
 	async onload() {
 		await this.loadSettings();
 
 		this.lock = new AsyncLock();
+		this.blockedFiles = new Set();
 
 		this.debouncedUpdateWordCount = debounce(
 			(editor: Editor, filepath: string) => {
@@ -222,15 +222,15 @@ export default class MyPlugin extends Plugin {
 	}
 
 	blockFile(filepath: string) {
-		this.settings.blockedFiles.add(filepath);
+		this.blockedFiles.add(filepath);
 		setTimeout(() => {
-			this.settings.blockedFiles.delete(filepath);
+			this.blockedFiles.delete(filepath);
 		}, BLOCK_DURATION);
 	}
 
 	updateWordCount(editor: Editor, filepath: string) {
 		this.acquireLock(() => {
-			if (this.settings.blockedFiles.has(filepath)) {
+			if (this.blockedFiles.has(filepath)) {
 				return;
 			}
 			const wordCount = this.getWordCount(editor.getValue());
