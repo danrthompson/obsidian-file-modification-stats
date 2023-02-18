@@ -1,3 +1,4 @@
+import AsyncLock from "async-lock";
 import moment from "moment-timezone";
 import {
 	debounce,
@@ -53,9 +54,12 @@ export default class MyPlugin extends Plugin {
 		[editor: Editor, filepath: string],
 		void
 	>;
+	lock: AsyncLock;
 
 	async onload() {
 		await this.loadSettings();
+
+		this.lock = new AsyncLock();
 
 		this.debouncedUpdateWordCount = debounce(
 			(editor: Editor, filepath: string) => {
@@ -77,109 +81,137 @@ export default class MyPlugin extends Plugin {
 		this.registerEvent(
 			this.app.vault.on("rename", this.onRename.bind(this))
 		);
+		this.registerEvent(
+			this.app.vault.on("delete", this.onDelete.bind(this))
+		);
+	}
+
+	async acquireLock(functionToCall: (() => Promise<void>) | (() => void)) {
+		this.lock.acquire(
+			"settings",
+			async function (done) {
+				await functionToCall();
+				done();
+			},
+			function (err) {
+				if (err) {
+					console.log(err);
+					throw err;
+				}
+			}
+		);
 	}
 
 	onRename(file: TFile, oldPath: string) {
-		var changed = false;
-		const newPath = file.path;
-		this.blockFile(oldPath);
-		const previousCounts = this.settings.previousCounts[oldPath];
-		if (previousCounts) {
-			previousCounts.deletedDate = null;
-			this.settings.previousCounts[newPath] = previousCounts;
-			delete this.settings.previousCounts[oldPath];
-			changed = true;
-		}
-
-		for (const day in this.settings.dayToWordCounts) {
-			const dayToWordCounts = this.settings.dayToWordCounts[day][oldPath];
-			if (dayToWordCounts) {
-				if (day === this.settings.today) {
-					dayToWordCounts.nameAtTime = newPath;
-				} else {
-					dayToWordCounts.nameAtTime = oldPath;
-				}
-				dayToWordCounts.renamed = true;
-				dayToWordCounts.currentName = newPath;
-				this.settings.dayToWordCounts[day][newPath] = dayToWordCounts;
-				delete this.settings.dayToWordCounts[day][oldPath];
+		this.acquireLock(() => {
+			var changed = false;
+			const newPath = file.path;
+			this.blockFile(oldPath);
+			const previousCounts = this.settings.previousCounts[oldPath];
+			if (previousCounts) {
+				previousCounts.deletedDate = null;
+				this.settings.previousCounts[newPath] = previousCounts;
+				delete this.settings.previousCounts[oldPath];
 				changed = true;
 			}
-		}
-		if (changed) {
-			this.updateSettingsModTime();
-		}
+
+			for (const day in this.settings.dayToWordCounts) {
+				const dayToWordCounts =
+					this.settings.dayToWordCounts[day][oldPath];
+				if (dayToWordCounts) {
+					if (day === this.settings.today) {
+						dayToWordCounts.nameAtTime = newPath;
+					} else {
+						dayToWordCounts.nameAtTime = oldPath;
+					}
+					dayToWordCounts.renamed = true;
+					dayToWordCounts.currentName = newPath;
+					this.settings.dayToWordCounts[day][newPath] =
+						dayToWordCounts;
+					delete this.settings.dayToWordCounts[day][oldPath];
+					changed = true;
+				}
+			}
+			if (changed) {
+				this.updateSettingsModTime();
+			}
+		});
 	}
 
 	onDelete(file: TFile) {
-		const path = file.path;
-		this.blockFile(path);
-		const previousCounts = this.settings.previousCounts[path];
-		const dayToWordCounts =
-			this.settings.dayToWordCounts[this.settings.today][path];
-		var initial = 0;
-		if (previousCounts) {
-			initial = previousCounts.lastObservedCount;
-			previousCounts.deletedDate = this.settings.today;
-			previousCounts.prevDate = previousCounts.lastDate;
-			previousCounts.lastDate = this.settings.today;
-			previousCounts.lastObservedCount = 0;
-		} else {
-			this.settings.previousCounts[path] = {
-				lastObservedCount: 0,
-				lastDate: this.settings.today,
-				prevDate: null,
-				firstDate: this.settings.today,
-				countOnPluginInstallation: 0,
-				deletedDate: this.settings.today,
-				createdDate: null,
-			};
-		}
-		if (dayToWordCounts) {
-			dayToWordCounts.current = 0;
-			dayToWordCounts.deleted = true;
-		} else {
-			this.settings.dayToWordCounts[this.settings.today][path] = {
-				initial: initial,
-				current: 0,
-				nameAtTime: path,
-				currentName: path,
-				deleted: true,
-				created: false,
-				renamed: false,
-			};
-		}
-		this.updateSettingsModTime();
-	}
-
-	async processNotesAfterInstallation() {
-		const files = this.app.vault.getMarkdownFiles();
-		var i = 0;
-		for (const file of files) {
+		this.acquireLock(() => {
 			const path = file.path;
+			this.blockFile(path);
 			const previousCounts = this.settings.previousCounts[path];
-			if (!previousCounts) {
-				const creationDate = moment
-					.tz(file.stat.ctime, "America/New_York")
-					.format("YYYY-MM-DD");
-				const modificationDate = moment
-					.tz(file.stat.mtime, "America/New_York")
-					.format("YYYY-MM-DD");
-				const content = await this.app.vault.read(file);
-				const wordCount = this.getWordCount(content);
+			const dayToWordCounts =
+				this.settings.dayToWordCounts[this.settings.today][path];
+			var initial = 0;
+			if (previousCounts) {
+				initial = previousCounts.lastObservedCount;
+				previousCounts.deletedDate = this.settings.today;
+				previousCounts.prevDate = previousCounts.lastDate;
+				previousCounts.lastDate = this.settings.today;
+				previousCounts.lastObservedCount = 0;
+			} else {
 				this.settings.previousCounts[path] = {
-					lastObservedCount: wordCount,
-					lastDate: modificationDate,
-					prevDate: creationDate,
-					firstDate: creationDate,
-					countOnPluginInstallation: wordCount,
-					deletedDate: null,
+					lastObservedCount: 0,
+					lastDate: this.settings.today,
+					prevDate: null,
+					firstDate: this.settings.today,
+					countOnPluginInstallation: 0,
+					deletedDate: this.settings.today,
 					createdDate: null,
 				};
 			}
-		}
-		this.updateSettingsModTime();
+			if (dayToWordCounts) {
+				dayToWordCounts.current = 0;
+				dayToWordCounts.deleted = true;
+			} else {
+				this.settings.dayToWordCounts[this.settings.today][path] = {
+					initial: initial,
+					current: 0,
+					nameAtTime: path,
+					currentName: path,
+					deleted: true,
+					created: false,
+					renamed: false,
+				};
+			}
+			this.updateSettingsModTime();
+		});
 	}
+
+	async processNotesAfterInstallation(file: TFile, oldPath: string) {
+		this.acquireLock(async () => {
+			const files = this.app.vault.getMarkdownFiles();
+			var i = 0;
+			for (const file of files) {
+				const path = file.path;
+				const previousCounts = this.settings.previousCounts[path];
+				if (!previousCounts) {
+					const creationDate = moment
+						.tz(file.stat.ctime, "America/New_York")
+						.format("YYYY-MM-DD");
+					const modificationDate = moment
+						.tz(file.stat.mtime, "America/New_York")
+						.format("YYYY-MM-DD");
+					const content = await this.app.vault.read(file);
+					const wordCount = this.getWordCount(content);
+					this.settings.previousCounts[path] = {
+						lastObservedCount: wordCount,
+						lastDate: modificationDate,
+						prevDate: creationDate,
+						firstDate: creationDate,
+						countOnPluginInstallation: wordCount,
+						deletedDate: null,
+						createdDate: null,
+					};
+				}
+			}
+			this.updateSettingsModTime();
+		});
+	}
+
 	async onChange(editor: Editor, info: MarkdownView | MarkdownFileInfo) {
 		const path = info.file?.path;
 		if (path) {
@@ -195,70 +227,74 @@ export default class MyPlugin extends Plugin {
 	}
 
 	updateWordCount(editor: Editor, filepath: string) {
-		if (this.settings.blockedFiles.has(filepath)) {
-			return;
-		}
-		const wordCount = this.getWordCount(editor.getValue());
-		const day = this.settings.today;
-		var previousCounts = this.settings.previousCounts[filepath];
-		var dayToWordCounts = this.settings.dayToWordCounts[day];
+		this.acquireLock(() => {
+			if (this.settings.blockedFiles.has(filepath)) {
+				return;
+			}
+			const wordCount = this.getWordCount(editor.getValue());
+			const day = this.settings.today;
+			var previousCounts = this.settings.previousCounts[filepath];
+			var dayToWordCounts = this.settings.dayToWordCounts[day];
 
-		if (!dayToWordCounts) {
-			this.settings.dayToWordCounts[day] = {};
-			dayToWordCounts = this.settings.dayToWordCounts[day];
-		}
+			if (!dayToWordCounts) {
+				this.settings.dayToWordCounts[day] = {};
+				dayToWordCounts = this.settings.dayToWordCounts[day];
+			}
 
-		var initial = 0;
-		var created = false;
-		if (!previousCounts) {
-			created = true;
-			this.settings.previousCounts[filepath] = {
-				countOnPluginInstallation: 0,
-				lastObservedCount: wordCount,
-				lastDate: day,
-				prevDate: null,
-				firstDate: day,
-				deletedDate: null,
-				createdDate: day,
-			};
-			previousCounts = this.settings.previousCounts[filepath];
-		} else {
-			if (previousCounts.deletedDate) {
+			var initial = 0;
+			var created = false;
+			if (!previousCounts) {
 				created = true;
-				previousCounts.deletedDate = null;
+				this.settings.previousCounts[filepath] = {
+					countOnPluginInstallation: 0,
+					lastObservedCount: wordCount,
+					lastDate: day,
+					prevDate: null,
+					firstDate: day,
+					deletedDate: null,
+					createdDate: day,
+				};
+				previousCounts = this.settings.previousCounts[filepath];
+			} else {
+				if (previousCounts.deletedDate) {
+					created = true;
+					previousCounts.deletedDate = null;
+				}
+				if (previousCounts.lastDate !== day) {
+					previousCounts.prevDate = previousCounts.lastDate;
+					previousCounts.lastDate = day;
+				}
+				initial = previousCounts.lastObservedCount;
+				previousCounts.lastObservedCount = wordCount;
 			}
-			if (previousCounts.lastDate !== day) {
-				previousCounts.prevDate = previousCounts.lastDate;
-				previousCounts.lastDate = day;
-			}
-			initial = previousCounts.lastObservedCount;
-			previousCounts.lastObservedCount = wordCount;
-		}
 
-		var todayWordCounts = dayToWordCounts[filepath];
-		if (!todayWordCounts) {
-			dayToWordCounts[filepath] = {
-				initial: initial,
-				current: wordCount,
-				nameAtTime: filepath,
-				currentName: filepath,
-				deleted: false,
-				renamed: false,
-				created: created,
-			};
-			todayWordCounts = dayToWordCounts[filepath];
-		} else {
-			todayWordCounts.current = wordCount;
-		}
-		this.updateSettingsModTime();
+			var todayWordCounts = dayToWordCounts[filepath];
+			if (!todayWordCounts) {
+				dayToWordCounts[filepath] = {
+					initial: initial,
+					current: wordCount,
+					nameAtTime: filepath,
+					currentName: filepath,
+					deleted: false,
+					renamed: false,
+					created: created,
+				};
+				todayWordCounts = dayToWordCounts[filepath];
+			} else {
+				todayWordCounts.current = wordCount;
+			}
+			this.updateSettingsModTime();
+		});
 	}
 
 	updateDate() {
-		const today = moment().tz("America/New_York").format("YYYY-MM-DD");
-		if (this.settings.today !== today) {
-			this.settings.today = today;
-			this.updateSettingsModTime();
-		}
+		this.acquireLock(() => {
+			const today = moment().tz("America/New_York").format("YYYY-MM-DD");
+			if (this.settings.today !== today) {
+				this.settings.today = today;
+				this.updateSettingsModTime();
+			}
+		});
 	}
 
 	getWordCount(text: string): number {
@@ -297,13 +333,15 @@ export default class MyPlugin extends Plugin {
 	}
 
 	async updateSettings() {
-		const dataContents = await this.loadData();
-		const lastModTime = dataContents.lastModTime || 0;
-		if (lastModTime < this.settings.lastModTime) {
-			await this.saveData(this.settings);
-		} else if (lastModTime > this.settings.lastModTime) {
-			await this.loadSettings();
-		}
+		this.acquireLock(async () => {
+			const dataContents = await this.loadData();
+			const lastModTime = dataContents.lastModTime || 0;
+			if (lastModTime < this.settings.lastModTime) {
+				await this.saveData(this.settings);
+			} else if (lastModTime > this.settings.lastModTime) {
+				await this.loadSettings();
+			}
+		});
 	}
 
 	updateSettingsModTime() {
@@ -311,11 +349,13 @@ export default class MyPlugin extends Plugin {
 	}
 
 	async saveSettings() {
-		if (
-			Object.keys(this.settings.dayToWordCounts).length > 0 &&
-			Object.keys(this.settings.previousCounts).length > 0
-		) {
-			await this.saveData(this.settings);
-		}
+		this.acquireLock(async () => {
+			if (
+				Object.keys(this.settings.dayToWordCounts).length > 0 &&
+				Object.keys(this.settings.previousCounts).length > 0
+			) {
+				await this.saveData(this.settings);
+			}
+		});
 	}
 }
