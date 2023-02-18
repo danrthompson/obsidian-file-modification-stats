@@ -1,5 +1,3 @@
-import fs from "fs";
-import path from "path";
 import moment from "moment-timezone";
 import {
 	debounce,
@@ -11,13 +9,16 @@ import {
 	TFile,
 } from "obsidian";
 
-// Remember to rename these classes and interfaces!
+const BLOCK_DURATION = 5000;
 
 interface WordCount {
 	initial: number;
 	current: number;
 	nameAtTime: string;
 	currentName: string;
+	deleted: boolean;
+	created: boolean;
+	renamed: boolean;
 }
 
 interface PreviousWordCount {
@@ -35,6 +36,7 @@ interface FileModificationSettings {
 	today: string;
 	previousCounts: Record<string, PreviousWordCount>;
 	dayToWordCounts: Record<string, Record<string, WordCount>>;
+	blockedFiles: Set<string>;
 }
 
 const DEFAULT_SETTINGS: FileModificationSettings = {
@@ -42,6 +44,7 @@ const DEFAULT_SETTINGS: FileModificationSettings = {
 	today: moment().tz("America/New_York").format("YYYY-MM-DD"),
 	previousCounts: {},
 	dayToWordCounts: {},
+	blockedFiles: new Set(),
 };
 
 export default class MyPlugin extends Plugin {
@@ -79,6 +82,7 @@ export default class MyPlugin extends Plugin {
 	onRename(file: TFile, oldPath: string) {
 		var changed = false;
 		const newPath = file.path;
+		this.blockFile(oldPath);
 		const previousCounts = this.settings.previousCounts[oldPath];
 		if (previousCounts) {
 			previousCounts.deletedDate = null;
@@ -95,6 +99,7 @@ export default class MyPlugin extends Plugin {
 				} else {
 					dayToWordCounts.nameAtTime = oldPath;
 				}
+				dayToWordCounts.renamed = true;
 				dayToWordCounts.currentName = newPath;
 				this.settings.dayToWordCounts[day][newPath] = dayToWordCounts;
 				delete this.settings.dayToWordCounts[day][oldPath];
@@ -107,8 +112,8 @@ export default class MyPlugin extends Plugin {
 	}
 
 	onDelete(file: TFile) {
-		var changed = false;
 		const path = file.path;
+		this.blockFile(path);
 		const previousCounts = this.settings.previousCounts[path];
 		const dayToWordCounts =
 			this.settings.dayToWordCounts[this.settings.today][path];
@@ -132,12 +137,16 @@ export default class MyPlugin extends Plugin {
 		}
 		if (dayToWordCounts) {
 			dayToWordCounts.current = 0;
+			dayToWordCounts.deleted = true;
 		} else {
 			this.settings.dayToWordCounts[this.settings.today][path] = {
 				initial: initial,
 				current: 0,
 				nameAtTime: path,
 				currentName: path,
+				deleted: true,
+				created: false,
+				renamed: false,
 			};
 		}
 		this.updateSettingsModTime();
@@ -178,7 +187,17 @@ export default class MyPlugin extends Plugin {
 		}
 	}
 
+	blockFile(filepath: string) {
+		this.settings.blockedFiles.add(filepath);
+		setTimeout(() => {
+			this.settings.blockedFiles.delete(filepath);
+		}, BLOCK_DURATION);
+	}
+
 	updateWordCount(editor: Editor, filepath: string) {
+		if (this.settings.blockedFiles.has(filepath)) {
+			return;
+		}
 		const wordCount = this.getWordCount(editor.getValue());
 		const day = this.settings.today;
 		var previousCounts = this.settings.previousCounts[filepath];
@@ -190,7 +209,9 @@ export default class MyPlugin extends Plugin {
 		}
 
 		var initial = 0;
+		var created = false;
 		if (!previousCounts) {
+			created = true;
 			this.settings.previousCounts[filepath] = {
 				countOnPluginInstallation: 0,
 				lastObservedCount: wordCount,
@@ -202,6 +223,10 @@ export default class MyPlugin extends Plugin {
 			};
 			previousCounts = this.settings.previousCounts[filepath];
 		} else {
+			if (previousCounts.deletedDate) {
+				created = true;
+				previousCounts.deletedDate = null;
+			}
 			if (previousCounts.lastDate !== day) {
 				previousCounts.prevDate = previousCounts.lastDate;
 				previousCounts.lastDate = day;
@@ -215,6 +240,11 @@ export default class MyPlugin extends Plugin {
 			dayToWordCounts[filepath] = {
 				initial: initial,
 				current: wordCount,
+				nameAtTime: filepath,
+				currentName: filepath,
+				deleted: false,
+				renamed: false,
+				created: created,
 			};
 			todayWordCounts = dayToWordCounts[filepath];
 		} else {
