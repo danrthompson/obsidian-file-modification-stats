@@ -283,6 +283,7 @@ export default class MyPlugin extends Plugin {
 				};
 				todayWordCounts = dayToWordCounts[filepath];
 			} else {
+				todayWordCounts.deleted = false;
 				todayWordCounts.current = wordCount;
 			}
 			this.updateSettingsModTime();
