@@ -5,9 +5,10 @@ import {
 	debounce,
 	Debouncer,
 	Editor,
+	MarkdownFileInfo,
 	MarkdownView,
 	Plugin,
-	MarkdownFileInfo,
+	TFile,
 } from "obsidian";
 
 // Remember to rename these classes and interfaces!
@@ -15,14 +16,18 @@ import {
 interface WordCount {
 	initial: number;
 	current: number;
+	nameAtTime: string;
+	currentName: string;
 }
 
 interface PreviousWordCount {
 	lastObservedCount: number;
 	lastDate: string;
-	prevDate: string;
+	prevDate: string | null;
 	firstDate: string;
 	countOnPluginInstallation: number;
+	deletedDate: string | null;
+	createdDate: string | null;
 }
 
 interface FileModificationSettings {
@@ -41,12 +46,15 @@ const DEFAULT_SETTINGS: FileModificationSettings = {
 
 export default class MyPlugin extends Plugin {
 	settings: FileModificationSettings;
-	debouncedUpdate: Debouncer<[editor: Editor, filepath: string], void>;
+	debouncedUpdateWordCount: Debouncer<
+		[editor: Editor, filepath: string],
+		void
+	>;
 
 	async onload() {
 		await this.loadSettings();
 
-		this.debouncedUpdate = debounce(
+		this.debouncedUpdateWordCount = debounce(
 			(editor: Editor, filepath: string) => {
 				this.updateWordCount(editor, filepath);
 			},
@@ -63,6 +71,76 @@ export default class MyPlugin extends Plugin {
 		this.registerEvent(
 			this.app.workspace.on("editor-change", this.onChange.bind(this))
 		);
+		this.registerEvent(
+			this.app.vault.on("rename", this.onRename.bind(this))
+		);
+	}
+
+	onRename(file: TFile, oldPath: string) {
+		var changed = false;
+		const newPath = file.path;
+		const previousCounts = this.settings.previousCounts[oldPath];
+		if (previousCounts) {
+			previousCounts.deletedDate = null;
+			this.settings.previousCounts[newPath] = previousCounts;
+			delete this.settings.previousCounts[oldPath];
+			changed = true;
+		}
+
+		for (const day in this.settings.dayToWordCounts) {
+			const dayToWordCounts = this.settings.dayToWordCounts[day][oldPath];
+			if (dayToWordCounts) {
+				if (day === this.settings.today) {
+					dayToWordCounts.nameAtTime = newPath;
+				} else {
+					dayToWordCounts.nameAtTime = oldPath;
+				}
+				dayToWordCounts.currentName = newPath;
+				this.settings.dayToWordCounts[day][newPath] = dayToWordCounts;
+				delete this.settings.dayToWordCounts[day][oldPath];
+				changed = true;
+			}
+		}
+		if (changed) {
+			this.updateSettingsModTime();
+		}
+	}
+
+	onDelete(file: TFile) {
+		var changed = false;
+		const path = file.path;
+		const previousCounts = this.settings.previousCounts[path];
+		const dayToWordCounts =
+			this.settings.dayToWordCounts[this.settings.today][path];
+		var initial = 0;
+		if (previousCounts) {
+			initial = previousCounts.lastObservedCount;
+			previousCounts.deletedDate = this.settings.today;
+			previousCounts.prevDate = previousCounts.lastDate;
+			previousCounts.lastDate = this.settings.today;
+			previousCounts.lastObservedCount = 0;
+		} else {
+			this.settings.previousCounts[path] = {
+				lastObservedCount: 0,
+				lastDate: this.settings.today,
+				prevDate: null,
+				firstDate: this.settings.today,
+				countOnPluginInstallation: 0,
+				deletedDate: this.settings.today,
+				createdDate: null,
+			};
+		}
+		if (dayToWordCounts) {
+			dayToWordCounts.current = 0;
+		} else {
+			this.settings.dayToWordCounts[this.settings.today][path] = {
+				initial: initial,
+				current: 0,
+				nameAtTime: path,
+				currentName: path,
+			};
+		}
+		this.updateSettingsModTime();
 	}
 
 	async processNotesAfterInstallation() {
@@ -86,6 +164,8 @@ export default class MyPlugin extends Plugin {
 					prevDate: creationDate,
 					firstDate: creationDate,
 					countOnPluginInstallation: wordCount,
+					deletedDate: null,
+					createdDate: null,
 				};
 			}
 		}
@@ -94,7 +174,7 @@ export default class MyPlugin extends Plugin {
 	async onChange(editor: Editor, info: MarkdownView | MarkdownFileInfo) {
 		const path = info.file?.path;
 		if (path) {
-			this.debouncedUpdate(editor, path);
+			this.debouncedUpdateWordCount(editor, path);
 		}
 	}
 
@@ -115,8 +195,10 @@ export default class MyPlugin extends Plugin {
 				countOnPluginInstallation: 0,
 				lastObservedCount: wordCount,
 				lastDate: day,
-				prevDate: "None",
+				prevDate: null,
 				firstDate: day,
+				deletedDate: null,
+				createdDate: day,
 			};
 			previousCounts = this.settings.previousCounts[filepath];
 		} else {
