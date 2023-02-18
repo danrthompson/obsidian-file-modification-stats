@@ -12,15 +12,23 @@ I have also added a function to the plugin that processes all the files that alr
 
 It handles concurrency properly with multiple devices, although if you make updates with two devices at the same time, it could lose the changes from one or the other device. But generally it should lose very little data, and in the end it should be fine because it will just misattribute a handful of words to the wrong day.
 
+It should handle renames and deletions properly, and it continues to store deleted data indefinitely.
+
 ## Limitations
 
 Right now, it just stores that info in the settings. You can create a dataviewjs table that shows the info in any way you want, but you have to create that query yourself at the moment.
 
 Also, there is not a way to use a command to run `processNotesAfterInstallation`. You have to do it from the console.
 
-Right now, it will not handle renaming files or deleting files properly. Renamed files will be seen as newly created files and the entire contents will show up for the day that the rename took place. And deleted files (and therefore the accompanying deleted characters) are not tracked. It will store the stats from the deleted file indefinitely.
-
 ## Future Features
+I want to add functions that can calculate additional statistics, like
+* Net number of words written per day (net meaning additions - deletions from net deleted files)
+* Absolute number of words written per day (meaning additions only)
+* Number of words written in total
+* Number of words written up to a certain date, after a certain date, or in a certain window
+
+The information to calculate those statistics is all present, but it would be nice to make it easy to expose them.
+
 I want to add commands that will automatically create dataview queries to show daily stats on your daily notes page, as well as other queries that show useful information.
 
 Right now, I have a dataview query that I am using that shows the files modified on a given day on the daily note page. I'd like to change what it shows, and also add stats about how many words were added in a given day, or a given range of days.
