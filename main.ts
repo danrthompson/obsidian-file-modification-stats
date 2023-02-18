@@ -149,8 +149,10 @@ export default class MyPlugin extends Plugin {
 			if (previousCounts) {
 				initial = previousCounts.lastObservedCount;
 				previousCounts.deletedDate = this.settings.today;
-				previousCounts.prevDate = previousCounts.lastDate;
-				previousCounts.lastDate = this.settings.today;
+				if (previousCounts.lastDate !== this.settings.today) {
+					previousCounts.prevDate = previousCounts.lastDate;
+					previousCounts.lastDate = this.settings.today;
+				}
 				previousCounts.lastObservedCount = 0;
 			} else {
 				this.settings.previousCounts[path] = {
@@ -356,6 +358,68 @@ export default class MyPlugin extends Plugin {
 			) {
 				await this.saveData(this.settings);
 			}
+		});
+	}
+
+	fixExistingSettings() {
+		this.acquireLock(() => {
+			const dayToWordCounts = this.settings.dayToWordCounts;
+			const previousCounts = this.settings.previousCounts;
+
+			for (const day in dayToWordCounts) {
+				for (const fileName in dayToWordCounts[day]) {
+					const wordCounts = dayToWordCounts[day][fileName];
+					if (wordCounts.created === undefined) {
+						wordCounts.created = false;
+					}
+					if (wordCounts.deleted === undefined) {
+						wordCounts.deleted = false;
+					}
+					if (wordCounts.renamed === undefined) {
+						wordCounts.renamed = false;
+					}
+					if (wordCounts.currentName === undefined) {
+						wordCounts.currentName = fileName;
+					}
+					if (wordCounts.nameAtTime === undefined) {
+						wordCounts.nameAtTime = fileName;
+					}
+					if (wordCounts.initial === undefined) {
+						wordCounts.initial = 0;
+					}
+					if (wordCounts.current === undefined) {
+						wordCounts.current = 0;
+					}
+				}
+			}
+			for (const fileName in previousCounts) {
+				const prevCounts = previousCounts[fileName];
+				if (prevCounts.countOnPluginInstallation === undefined) {
+					prevCounts.countOnPluginInstallation = 0;
+				}
+				if (prevCounts.lastObservedCount === undefined) {
+					prevCounts.lastObservedCount = 0;
+				}
+				if (prevCounts.createdDate === undefined) {
+					prevCounts.createdDate = null;
+				}
+				if (prevCounts.deletedDate === undefined) {
+					prevCounts.deletedDate = null;
+				}
+				if (prevCounts.prevDate === undefined) {
+					prevCounts.prevDate = null;
+				}
+				if (prevCounts.prevDate === "None") {
+					prevCounts.prevDate = null;
+				}
+				if (prevCounts.firstDate === undefined) {
+					console.log(`firstDate undefined for ${fileName}`);
+				}
+				if (prevCounts.lastDate === undefined) {
+					console.log(`lastDate undefined for ${fileName}`);
+				}
+			}
+			this.updateSettingsModTime();
 		});
 	}
 }
