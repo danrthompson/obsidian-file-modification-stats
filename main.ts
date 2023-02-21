@@ -1,9 +1,12 @@
-import AsyncLock from "async-lock";
+import fs from "fs";
 import moment from "moment-timezone";
+import path from "path";
+import AsyncLock from "async-lock";
 import {
 	debounce,
 	Debouncer,
 	Editor,
+	FileSystemAdapter,
 	MarkdownFileInfo,
 	MarkdownView,
 	Plugin,
@@ -11,6 +14,7 @@ import {
 } from "obsidian";
 
 const BLOCK_DURATION = 5000;
+const BACKUP_STATS_DIR = "daily-file-modification-stats-backups";
 
 interface WordCount {
 	initial: number;
@@ -296,7 +300,44 @@ export default class MyPlugin extends Plugin {
 			if (this.settings.today !== today) {
 				this.settings.today = today;
 				this.updateSettingsModTime();
+				this.writeDailyDataBackup();
 			}
+		});
+	}
+
+	getPathToObsidianDir() {
+		const adapter = this.app.vault.adapter;
+		if (adapter instanceof FileSystemAdapter) {
+			return path.join(adapter.getBasePath(), ".obsidian");
+		}
+		return null;
+	}
+
+	writeDailyDataBackup() {
+		const pathToObsidianDir = this.getPathToObsidianDir();
+		if (!pathToObsidianDir) {
+			return;
+		}
+		const backupFilename = `backup_${this.settings.today}.json`;
+		const backupPath = path.join(
+			pathToObsidianDir,
+			BACKUP_STATS_DIR,
+			backupFilename
+		);
+		const backupDir = path.dirname(backupPath);
+		if (!fs.existsSync(backupDir)) {
+			// If it doesn't exist, create it
+			fs.mkdirSync(backupDir, { recursive: true });
+		}
+		this.acquireLock(() => {
+			const settingsString = JSON.stringify(this.settings, null, 4);
+			fs.writeFile(backupPath, settingsString, (err) => {
+				if (err) {
+					console.error(err);
+					return;
+				}
+				console.log(`Successfully wrote string to file: ${backupPath}`);
+			});
 		});
 	}
 
