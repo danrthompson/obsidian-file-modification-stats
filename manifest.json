@@ -1,7 +1,7 @@
 {
 	"id": "obsidian-file-modification-stats",
 	"name": "File modification stats",
-	"version": "1.3.0",
+	"version": "1.4.0",
 	"minAppVersion": "0.15.0",
 	"description": "This plugin tracks the files modified in Obsidian.",
 	"author": "Dan Thompson",

@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-file-modification-stats",
-	"version": "1.3.0",
+	"version": "1.4.0",
 	"description": "This plugin tracks the files modified in Obsidian.",
 	"main": "main.js",
 	"scripts": {
