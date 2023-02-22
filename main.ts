@@ -187,7 +187,7 @@ export default class MyPlugin extends Plugin {
 		});
 	}
 
-	async processNotesAfterInstallation(file: TFile, oldPath: string) {
+	async processNotesAfterInstallation() {
 		this.acquireLock(async () => {
 			const files = this.app.vault.getMarkdownFiles();
 			var i = 0;
@@ -212,6 +212,205 @@ export default class MyPlugin extends Plugin {
 						deletedDate: null,
 						createdDate: null,
 					};
+				}
+			}
+			this.updateSettingsModTime();
+		});
+	}
+
+	checkIfFileShouldBeUpdated(
+		path: string,
+		modificationDate: string,
+		wordCount: number
+	) {
+		var previousCounts = this.settings.previousCounts[path];
+		if (!previousCounts) {
+			console.log(
+				`Previous count does not exist. Updating. File: ${path}`
+			);
+			return true;
+		}
+
+		const lastObservedCount = previousCounts.lastObservedCount;
+		if (lastObservedCount !== wordCount) {
+			console.log(
+				`Word count changed. Diff: ${
+					wordCount - lastObservedCount
+				}. Previous word count: ${lastObservedCount}. Current word count: ${wordCount}. Updating. File: ${path}`
+			);
+			return true;
+		}
+
+		const lastDate = previousCounts.lastDate;
+		var modDayToWordCounts = null;
+		if (lastDate === modificationDate) {
+			modDayToWordCounts = this.settings.dayToWordCounts[lastDate];
+		} else {
+			const earlierDate = moment
+				.min(moment(lastDate), moment(modificationDate))
+				.format("YYYY-MM-DD");
+			const laterDate = moment
+				.max(moment(lastDate), moment(modificationDate))
+				.format("YYYY-MM-DD");
+			modDayToWordCounts = this.settings.dayToWordCounts[laterDate];
+			if (!modDayToWordCounts || !modDayToWordCounts[path]) {
+				modDayToWordCounts = this.settings.dayToWordCounts[earlierDate];
+			}
+		}
+
+		if (!modDayToWordCounts) {
+			if (previousCounts.countOnPluginInstallation === wordCount) {
+				return false;
+			}
+			console.log(
+				`No word count for the day in question. Updating. File: ${path}`
+			);
+			return true;
+		}
+
+		const modDayWordCounts = modDayToWordCounts[path];
+		if (!modDayWordCounts) {
+			if (previousCounts.countOnPluginInstallation === wordCount) {
+				return false;
+			}
+			console.log(`No word count for the file. Updating. File: ${path}`);
+			return true;
+		}
+
+		if (modDayWordCounts.current !== wordCount) {
+			console.log(
+				`Word count changed. Updating. Diff: ${
+					wordCount - modDayWordCounts.current
+				}. Previous word count: ${
+					modDayWordCounts.current
+				}. Current word count: ${wordCount}. File: ${path}`
+			);
+			return true;
+		}
+
+		return false;
+	}
+
+	async processNotesAfterExternalChange(
+		dryRun: boolean = true,
+		changesMustBeToday: boolean = true,
+		creationMustBeToday: boolean = true
+	) {
+		this.acquireLock(async () => {
+			const files = this.app.vault.getMarkdownFiles();
+			const today = this.settings.today;
+
+			var i = 0;
+			for (const file of files) {
+				const path = file.path;
+				const creationDate = moment
+					.tz(file.stat.ctime, "America/New_York")
+					.format("YYYY-MM-DD");
+				const modificationDate = moment
+					.tz(file.stat.mtime, "America/New_York")
+					.format("YYYY-MM-DD");
+
+				const content = await this.app.vault.read(file);
+				const wordCount = this.getWordCount(content);
+
+				const shouldUpdate = this.checkIfFileShouldBeUpdated(
+					path,
+					modificationDate,
+					wordCount
+				);
+				if (!shouldUpdate) {
+					continue;
+				}
+
+				if (dryRun) {
+					// console.log(
+					// 	`Dry run. Not making changes, but the file ${path} would have been updated.`
+					// );
+					continue;
+				}
+
+				var previousCounts = this.settings.previousCounts[path];
+				if (creationDate !== today || modificationDate !== today) {
+					const alreadyCreated = previousCounts !== undefined;
+					const continueAnyway =
+						(creationDate === today ||
+							!creationMustBeToday ||
+							alreadyCreated) &&
+						(modificationDate === today || !changesMustBeToday);
+					const logMessage = continueAnyway
+						? "Creating anyway."
+						: "Skipping.";
+					var message = `Today is ${today}. File ${path} was modified on ${modificationDate}.`;
+					if (!alreadyCreated) {
+						message += ` File has not been seen before, therefore it was newly created on ${creationDate}.`;
+					}
+					if (creationDate !== today) {
+						message += " Creation date is not today.";
+					}
+					if (modificationDate !== today) {
+						message += " Modification date is not today.";
+					}
+					message += ` ${logMessage}`;
+					console.log(message);
+					if (!continueAnyway) {
+						continue;
+					}
+				}
+
+				console.log(`Updating file ${path}.`);
+
+				var initial = 0;
+				var created = false;
+
+				if (!previousCounts) {
+					created = true;
+					this.settings.previousCounts[path] = {
+						countOnPluginInstallation: 0,
+						lastObservedCount: wordCount,
+						lastDate: modificationDate,
+						prevDate: null,
+						firstDate: creationDate,
+						deletedDate: null,
+						createdDate: creationDate,
+					};
+					previousCounts = this.settings.previousCounts[path];
+				} else {
+					if (previousCounts.deletedDate) {
+						created = true;
+						previousCounts.deletedDate = null;
+					}
+					if (previousCounts.lastDate !== modificationDate) {
+						previousCounts.prevDate = previousCounts.lastDate;
+						previousCounts.lastDate = modificationDate;
+					}
+					initial = previousCounts.lastObservedCount;
+					previousCounts.lastObservedCount = wordCount;
+				}
+
+				var dayToWordCounts =
+					this.settings.dayToWordCounts[modificationDate];
+				if (!dayToWordCounts) {
+					this.settings.dayToWordCounts[modificationDate] = {};
+					dayToWordCounts =
+						this.settings.dayToWordCounts[modificationDate];
+				}
+
+				var todayWordCounts = dayToWordCounts[path];
+				if (!todayWordCounts) {
+					dayToWordCounts[path] = {
+						initial: initial,
+						current: wordCount,
+						nameAtTime: path,
+						currentName: path,
+						deleted: false,
+						renamed: false,
+						// TODO: Note that this will mean certain files will not have a creation date
+						created: created && modificationDate === creationDate,
+					};
+					todayWordCounts = dayToWordCounts[path];
+				} else {
+					todayWordCounts.deleted = false;
+					todayWordCounts.current = wordCount;
 				}
 			}
 			this.updateSettingsModTime();

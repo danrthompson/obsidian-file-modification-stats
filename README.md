@@ -14,11 +14,17 @@ It handles concurrency properly with multiple devices, although if you make upda
 
 It should handle renames and deletions properly, and it continues to store deleted data indefinitely.
 
+I have created a function (that must be manually called), that you can run after externally changing files, and it should update things properly.
+
 ## Limitations
 
 Right now, it just stores that info in the settings. You can create a dataviewjs table that shows the info in any way you want, but you have to create that query yourself at the moment.
 
 Also, there is not a way to use a command to run `processNotesAfterInstallation`. You have to do it from the console.
+
+If you externally edit the files (using an external application, like VSCode, e.g. to use find and replace), the plugin will not attribute the changes to the day that they happened on. Programmatic changes from plugins should be fine, but Obsidian will not pick up on changes made externally. Thus, they will only show up when the file is visited.
+
+I have created a function (that must be manually called), that you can run after externally changing files, and it should update things properly.
 
 ## Future Features
 I want to add functions that can calculate additional statistics, like
