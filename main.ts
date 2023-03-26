@@ -34,6 +34,7 @@ interface PreviousWordCount {
 	prevDate: string | null;
 	deletedDate: string | null;
 	countOnPluginInstallation: number;
+	countOnCreationFromTemplate: number;
 }
 
 interface FileModificationSettings {
@@ -53,7 +54,7 @@ const DEFAULT_SETTINGS: FileModificationSettings = {
 export default class MyPlugin extends Plugin {
 	settings: FileModificationSettings;
 	debouncedUpdateWordCount: Debouncer<
-		[editor: Editor, filepath: string],
+		[editor: Editor, file: TFile | null],
 		void
 	>;
 	lock: AsyncLock;
@@ -66,8 +67,8 @@ export default class MyPlugin extends Plugin {
 		this.blockedFiles = new Set();
 
 		this.debouncedUpdateWordCount = debounce(
-			(editor: Editor, filepath: string) => {
-				this.updateWordCount(editor, filepath);
+			(editor: Editor, file: TFile | null) => {
+				this.updateWordCount(editor, file);
 			},
 			2000,
 			false
@@ -165,6 +166,7 @@ export default class MyPlugin extends Plugin {
 					prevDate: null,
 					firstDate: this.settings.today,
 					countOnPluginInstallation: 0,
+					countOnCreationFromTemplate: 0,
 					deletedDate: this.settings.today,
 					createdDate: null,
 				};
@@ -209,6 +211,7 @@ export default class MyPlugin extends Plugin {
 						prevDate: creationDate,
 						firstDate: creationDate,
 						countOnPluginInstallation: wordCount,
+						countOnCreationFromTemplate: 0,
 						deletedDate: null,
 						createdDate: null,
 					};
@@ -366,6 +369,7 @@ export default class MyPlugin extends Plugin {
 					created = true;
 					this.settings.previousCounts[path] = {
 						countOnPluginInstallation: 0,
+						countOnCreationFromTemplate: 0,
 						lastObservedCount: wordCount,
 						lastDate: modificationDate,
 						prevDate: null,
@@ -418,9 +422,9 @@ export default class MyPlugin extends Plugin {
 	}
 
 	async onChange(editor: Editor, info: MarkdownView | MarkdownFileInfo) {
-		const path = info.file?.path;
+		const file = info.file;
 		if (path) {
-			this.debouncedUpdateWordCount(editor, path);
+			this.debouncedUpdateWordCount(editor, file);
 		}
 	}
 
@@ -431,8 +435,12 @@ export default class MyPlugin extends Plugin {
 		}, BLOCK_DURATION);
 	}
 
-	updateWordCount(editor: Editor, filepath: string) {
+	updateWordCount(editor: Editor, file: TFile | null) {
+		if (!file) {
+			return;
+		}
 		this.acquireLock(() => {
+			const filepath = file.path;
 			if (this.blockedFiles.has(filepath)) {
 				return;
 			}
@@ -448,10 +456,22 @@ export default class MyPlugin extends Plugin {
 
 			var initial = 0;
 			var created = false;
+			var countOnCreationFromTemplate = 0;
 			if (!previousCounts) {
+				if (filepath.startsWith("journals/")) {
+					const now = moment.tz("America/New_York");
+					const ctime = moment.tz(
+						file.stat.ctime,
+						"America/New_York"
+					);
+					if (ctime && now.diff(ctime, "seconds") < 60) {
+						countOnCreationFromTemplate = wordCount;
+					}
+				}
 				created = true;
 				this.settings.previousCounts[filepath] = {
 					countOnPluginInstallation: 0,
+					countOnCreationFromTemplate: countOnCreationFromTemplate,
 					lastObservedCount: wordCount,
 					lastDate: day,
 					prevDate: null,
@@ -637,6 +657,9 @@ export default class MyPlugin extends Plugin {
 				const prevCounts = previousCounts[fileName];
 				if (prevCounts.countOnPluginInstallation === undefined) {
 					prevCounts.countOnPluginInstallation = 0;
+				}
+				if (prevCounts.countOnCreationFromTemplate === undefined) {
+					prevCounts.countOnCreationFromTemplate = 0;
 				}
 				if (prevCounts.lastObservedCount === undefined) {
 					prevCounts.lastObservedCount = 0;
